@@ -8,7 +8,7 @@ will serve as an input to generator which will attempt to produce a 1x2x256x256 
 that we will feed into the discriminator in a sequence with original a,b channels.
 
 
-code borrows from
+### code borrows from
 https://github.com/Ldpe2G/DeepLearningForFun/tree/master/Mxnet-Scala/Pix2Pix
 https://github.com/tqchen/mxnet-gan
 https://github.com/affinelayer/pix2pix-tensorflow
