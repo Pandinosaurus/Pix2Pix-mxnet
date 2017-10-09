@@ -1,5 +1,6 @@
 import mxnet as mx
 import mxnet.ndarray as nd
+import numpy as np
 
 
 # Converted to MXNet by skirdey
@@ -103,7 +104,6 @@ def lab_to_rgb(lab, ctx=None):
 
         return srgb_pixels.reshape(lab.shape)
 
-
 def __normalize_rgb_image(arr):
     cast = nd.cast(arr, 'float32')
     scale = 1. / 255
@@ -119,3 +119,5 @@ def __check_image(image):
     shape = list(image.shape)
     shape[-1] = 3
     return nd.reshape(image, shape)
+
+

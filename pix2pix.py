@@ -11,11 +11,12 @@ from pix2pix_metrics import entropy, accuracy, error
 from util.lab_color_utils_mx import rgb_to_lab, lab_to_rgb
 from util.process_lab_utils_mx import preprocess_lab, deprocess_lab
 from util.image_iter import ImageIter
+from util.process_lab_utils_np import lab_parts_to_rgb
 
 
 @implementer(NeuralNetworkInterface)
 class Pix2Pix(object):
-    def __init__(self):
+    def __init__(self, options):
         # Great explanation of Convolutional network parameters
         # https://adeshpande3.github.io/adeshpande3.github.io/A-Beginner's-Guide-To-Understanding-Convolutional-Neural-Networks/
         self.kernel_size = (4, 4)  # look at a square of 4x4 pixels to form a filter
@@ -110,26 +111,15 @@ class Pix2Pix(object):
                       self.metric_generator_entropy.get(),
                       self.metric_discriminator_entropy.get())
 
-                fake_rgb = self.lab_parts_to_rgb(self.fake_b.asnumpy(), a_image.asnumpy(), ctx=self.ctx)
+                fake_rgb = lab_parts_to_rgb(self.fake_b.asnumpy(), a_image.asnumpy())
+
                 # TODO: move to visualize_progress function
                 cv2.imshow("Real lightness", np.squeeze(a_image.asnumpy(), axis=0).transpose((1, 2, 0)))
                 cv2.imshow("Fake colorization", cv2.cvtColor(fake_rgb.asnumpy(), cv2.COLOR_BGR2RGB))
                 cv2.imshow("Real image", cv2.cvtColor(nd.cast(real_a, dtype='uint8').asnumpy(), cv2.COLOR_BGR2RGB))
                 cv2.waitKey(1)
 
-    def lab_parts_to_rgb(self, image, brightness, ctx=None):
-        if ctx is None:
-            raise ValueError("ctx can not be None")
 
-        image = np.squeeze(image, axis=0)
-        brightness = np.squeeze(brightness, axis=0)
-        a_chan, b_chan = np.split(image, 2, 0)
-        a_chan = nd.array(a_chan, ctx=ctx)
-        b_chan = nd.array(b_chan, ctx=ctx)
-        brightness = nd.array(brightness, ctx=self.ctx)
-        lab = deprocess_lab(brightness, a_chan, b_chan)
-        rgb = lab_to_rgb(nd.array(np.squeeze(lab.asnumpy(), axis=0), ctx=ctx), ctx=ctx)
-        return nd.cast(rgb * 256, dtype='uint8')
 
     def _get_pix2pix_unet_generator(self):
         """
@@ -341,11 +331,16 @@ class Pix2Pix(object):
 
     def __forward_discriminator(self):
         # Update discriminator on real
-        # self.real_b = target
+        # here we update the weights of the discriminator network by showing it what is a real image and supplying real label to it
+        # if it detects a real image as fake, it would update weights accordingly
         # D(x,y)
+
+        # We train D to maximize the probability of assigning the correct label to both training examples and samples from G
         self.label[:] = 1
         self.mod_discriminator.forward(mx.io.DataBatch([self.real_b], [self.label]), is_train=True)
         self.mod_discriminator.backward()
+
+        # we get total discriminator gradient after backward o
         self.temp_grad_discriminator = [[grad.copyto(grad.context) for grad in grads] for grads in
                                         self.mod_discriminator._exec_group.grad_arrays]
 
@@ -366,7 +361,12 @@ class Pix2Pix(object):
         #           G   D
         # L1 loss = self.mod_loss => absolute difference between real image and a generated fake
         # duh
+        # We send fake image inpersonating as a real one to the discriminator,
+        # and getting the error that we get from D(G(x))
+        # the error we get from the discriminator shows how well discriminator can tell if something
+        # is real or fake.
 
+        # We simultaneously train G to minimize log(1 − D(G(z)))
         self.label[:] = 1
         self.mod_discriminator.forward(mx.io.DataBatch([self.fake_b], [self.label]), is_train=True)
         self.mod_discriminator.backward()  # back-propogate on the real error - adjust weights
