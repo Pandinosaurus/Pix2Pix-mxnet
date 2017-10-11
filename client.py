@@ -1,5 +1,7 @@
+import cv2
 import mxnet as mx
 import mxnet.ndarray as nd
+import numpy as np
 
 from cv2_utils import show_mxnet_to_numpy_array
 from startup_options import parse_startup_arguments
@@ -11,7 +13,7 @@ ctx = mx.gpu(0) if mx.gpu(0) else mx.cpu()
 
 def load_generator_from_checkpoint(options):
     file_prefix = options.client_checkpoint_generative_model_prefix
-    training_epoch = options.client_checkpoint_generative_model_epoch
+    training_epoch = 0
 
     mod_generator = mx.module.Module.load(file_prefix, training_epoch, load_optimizer_states=True, data_names=('gData',),
                                                label_names=None, context=ctx)
@@ -32,25 +34,42 @@ def load_image(image_filename):
 
     return mx.img.imdecode(str_image)
 
+def get_color_channels(image):
+
+    w, h = image.shape[0:2]
+
+    if image.shape[0:1] != (256, 256):
+        image = mx.image.resize_short(image, 256)
+        image = mx.image.center_crop(image, (256, 256))[0]
+
+    lightness_chan = get_lightness(image)
+
+    grayscale_lightness = nd.expand_dims(lightness_chan, axis=2).transpose((3, 2, 0, 1))
+    model.forward(mx.io.DataBatch([grayscale_lightness]), is_train=False)
+    output = model.get_outputs()[0].copy()
+    output = nd.array(np.squeeze(output.asnumpy(), axis=0))
+    output = output.transpose((1,2,0))
+    output = cv2.resize(output.asnumpy(), (w, h), interpolation=cv2.INTER_CUBIC)
+    output = nd.expand_dims(nd.array(output), axis=2).transpose((2, 3, 1, 0))
+    return output
+
+def get_lightness(image):
+    image = image.as_in_context(ctx)
+    lab = rgb_to_lab(image, ctx=ctx)
+    lightness_chan, _, _ = preprocess_lab(lab)
+    return lightness_chan
+
 
 def colorize_image(image_filename, model):
     real_a = load_image(image_filename)
 
-    if real_a.shape[0:1] != (256, 256):
-        real_a = mx.image.resize_short(real_a, 256)
-        real_a = mx.image.center_crop(real_a, (256, 256))[0]
+    colorchannels = get_color_channels(real_a)
+    grayscale_lightness = nd.expand_dims(get_lightness(real_a), axis=2).transpose((2,3,0,1))
 
-    real_a = real_a.as_in_context(ctx)
+    print(colorchannels.shape)
+    print(grayscale_lightness.shape)
 
-    lab = rgb_to_lab(real_a, ctx=ctx)
-    lightness_chan, _, _ = preprocess_lab(lab)
-
-    grayscale_lightness = nd.expand_dims(lightness_chan, axis=2).transpose((3, 2, 0, 1))
-
-    model.forward(mx.io.DataBatch([grayscale_lightness]), is_train=False)
-    colorized = model.get_outputs()[0].copy()
-
-    fake_rgb = lab_parts_to_rgb(colorized.asnumpy(), grayscale_lightness.asnumpy())
+    fake_rgb = lab_parts_to_rgb(colorchannels.asnumpy(), grayscale_lightness.asnumpy())
 
     return fake_rgb
 
@@ -64,6 +83,7 @@ if __name__ == '__main__':
         model = load_generator_from_checkpoint(options)
         image =  colorize_image(file_to_colorize, model)
 
-        show_mxnet_to_numpy_array("Fake colorization", image.asnumpy())
+        if options.visualize_colorization:
+            show_mxnet_to_numpy_array("Fake colorization", image)
 
 

@@ -40,6 +40,10 @@ class Pix2Pix(object):
         self.real_b = mx.nd.empty((1, 2, 256, 256), self.ctx)
         self.fake_b = mx.nd.empty((1, 2, 256, 256), self.ctx)
         self.resumed = False
+        self.opts = options
+
+        assert self.opts
+        assert self.opts.input_dir
 
     def save_progress(self, epoch):
         self.mod_discriminator.save_checkpoint("D", epoch, save_optimizer_states=True)
@@ -115,7 +119,7 @@ class Pix2Pix(object):
 
                 # TODO: move to visualize_progress function
                 cv2.imshow("Real lightness", np.squeeze(a_image.asnumpy(), axis=0).transpose((1, 2, 0)))
-                cv2.imshow("Fake colorization", cv2.cvtColor(fake_rgb.asnumpy(), cv2.COLOR_BGR2RGB))
+                cv2.imshow("Fake colorization", cv2.cvtColor(fake_rgb, cv2.COLOR_BGR2RGB))
                 cv2.imshow("Real image", cv2.cvtColor(nd.cast(real_a, dtype='uint8').asnumpy(), cv2.COLOR_BGR2RGB))
                 cv2.waitKey(1)
 
@@ -392,7 +396,10 @@ class Pix2Pix(object):
     def setup(self):
         symbol_generator = self._get_pix2pix_unet_generator()
         symbol_discriminator = self._get_pix2pix_discriminator()
-        self.train_iter = ImageIter(self.batch_size, (3, 256, 256), 'dData')
+        self.train_iter = ImageIter(self.batch_size, (3, 256, 256), 'dData', self.opts)
+
+        print(self.train_iter)
+
         self.label = mx.nd.zeros((1, 1, 30, 30), ctx=self.ctx)
 
         # L1 Absolute Loss module
