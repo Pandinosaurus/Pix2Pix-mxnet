@@ -1,6 +1,6 @@
-from startup_options import parse_startup_arguments
+from network.pix2pix import Pix2Pix
+from options import parse_startup_arguments
 from trainer import Trainer
-from pix2pix import Pix2Pix
 
 if __name__ == '__main__':
     options = parse_startup_arguments()

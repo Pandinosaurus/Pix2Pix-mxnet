@@ -11,8 +11,8 @@ class Trainer(object):
         self.trainee = trainee
         self.epochs = options.max_epochs
         self.checkpoint_every_epoch = options.checkpoint_freq
-        self.resume = options.resume_training
-        self.resume_epoch = 1
+        self.resume = options.resume_training if options.resume_training else False
+        self.resume_epoch = 0
 
     def save_progress(self, epoch):
         self.trainee.save_progress(epoch)
