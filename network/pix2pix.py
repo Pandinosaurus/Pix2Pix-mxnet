@@ -6,7 +6,7 @@ import mxnet as mx
 import mxnet.ndarray as nd
 import numpy as np
 
-from network.pix2pix_g_and_d import get_pix2pix_unet_generator, get_pix2pix_discriminator
+from network.pix2pix_architecture import get_pix2pix_unet_generator, get_pix2pix_discriminator
 from .neural_network_interface import NeuralNetworkInterface
 from zope.interface import implementer
 
@@ -15,22 +15,34 @@ from util.lab_color_utils_mx import rgb_to_lab
 from util.process_lab_utils_mx import preprocess_lab
 from util.process_lab_utils_np import lab_parts_to_rgb
 
+import matplotlib as mpl
+from matplotlib import pyplot as plt
 
-plt.ion()
-fig, ax = plt.subplots()
+from mxnet import gluon, autograd, nd
+from mxnet.gluon import nn
 
 
 @implementer(NeuralNetworkInterface)
 class Pix2Pix(object):
     def __init__(self, options):
+
+        self.ctx = mx.cpu(0) if not options.gpu_ctx else mx.gpu(0)
+
         # Great explanation of Convolutional network parameters
         # https://adeshpande3.github.io/adeshpande3.github.io/A-Beginner's-Guide-To-Understanding-Convolutional-Neural-Networks/
+        self.label = mx.nd.zeros((1, 1, 30, 30), ctx=self.ctx)
+
+        self.train_iter = mx.image.ImageIter(
+            1,
+            (3, 256, 256),
+            path_imgrec=options.input_dir
+        )
         self.kernel_size = (4, 4)  # look at a square of 4x4 pixels to form a filter
         self.stride_size = (2, 2)  # amount by which the filter shifts
-        self.padding_size = (1, 1)  # ?
-        self.slope = 0.2  # ?
-        self.no_bias = True  # ?
-        self.fix_gamma = True  # ?
+        self.padding_size = (1, 1)
+        self.slope = 0.2
+        self.no_bias = True
+        self.fix_gamma = True
         self.ngf = options.ngf if options.ngf else 64  # starting number of generator filters
         self.ndf = options.ngf if options.ndf else 64  # starting number of discriminator filters
         self.batch_size = options.batch_size if options.batch_size else 1  # we train on one image at a time
@@ -38,7 +50,6 @@ class Pix2Pix(object):
         self.lr = options.lr if options.lr else 0.0002
         self.epochs = options.max_epochs if options.max_epochs else 400
         self.beta1 = options.beta1 if options.beta1 else 400
-        self.ctx = mx.gpu(0)  # working on gpu 0
         self.check_point = True
         self.temp_grad_discriminator = None
         self.temp_grad_generator = None
@@ -51,6 +62,7 @@ class Pix2Pix(object):
 
         assert self.opts
         assert self.opts.input_dir
+        assert self.train_iter
 
     def save_progress(self, epoch):
         self.mod_discriminator.save_checkpoint("D", epoch, save_optimizer_states=True)
@@ -86,10 +98,10 @@ class Pix2Pix(object):
     def visualize_progress(self):
         pass
 
-    def run_iteration(self, epoch):
-        self._do_train_iteration(epoch)
+    def run_iteration(self):
+        self._do_train_iteration()
 
-    def _do_train_iteration(self, epoch):
+    def _do_train_iteration(self):
 
         self.train_iter.reset()
         for count, batch in enumerate(self.train_iter):
@@ -111,18 +123,14 @@ class Pix2Pix(object):
             self.__create_real_fake(inputs, targets)
             self.__forward_backward()
 
-            if count % 2000 == 0:
-                ax.scatter(count, self.l1_loss)
-                fig.canvas.flush_events()
+            if count % 10 == 0:
 
-                fake_rgb = lab_parts_to_rgb(self.fake_b.asnumpy(), a_image.asnumpy())
+                fake_rgb = lab_parts_to_rgb(self.fake_b.asnumpy(), a_image.asnumpy(), self.ctx)
                 # TODO: move to visualize_progress function
                 cv2.imshow("Fake colorization", cv2.cvtColor(fake_rgb, cv2.COLOR_BGR2RGB))
-                # cv2.imshow("Real image", cv2.cvtColor(nd.cast(real_a, dtype='uint8').asnumpy(), cv2.COLOR_BGR2RGB))
+                cv2.imshow("Real image", cv2.cvtColor(nd.cast(real_a, dtype='uint8').asnumpy(), cv2.COLOR_BGR2RGB))
                 cv2.waitKey(1)
 
-        plt.ioff()
-        plt.show()
 
     def __create_real_fake(self, inputs, targets):
         self.real_a = inputs
@@ -190,16 +198,9 @@ class Pix2Pix(object):
     def setup(self):
         symbol_generator = get_pix2pix_unet_generator(self)
         symbol_discriminator = get_pix2pix_discriminator(self)
-        self.train_iter = mx.image.ImageIter(
-            1,
-            (3, 256, 256),
-            path_imgrec=self.opts.input_dir
-        )
 
-        self.label = mx.nd.zeros((1, 1, 30, 30), ctx=self.ctx)
-
-        mod_loss = mx.mod.Module(symbol=get_l1_absolute_loss(), data_names=('origin','rec',), label_names=None,
-                                         context=self.ctx)
+        mod_loss = mx.mod.Module(symbol=get_l1_absolute_loss(), data_names=("origin", "rec",), label_names=None,
+                                 context=self.ctx)
         mod_loss.bind(data_shapes=[('origin', (self.batch_size,) + (2, 256, 256)), ('rec', (self.batch_size,) + (2, 256, 256))], inputs_need_grad=True)
         mod_loss.init_params(initializer=mx.init.Zero())
         mod_loss.init_optimizer(
