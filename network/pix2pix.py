@@ -1,7 +1,4 @@
-import math
-
 import cv2
-import matplotlib.pyplot as plt
 import mxnet as mx
 import mxnet.ndarray as nd
 import numpy as np
@@ -14,12 +11,6 @@ from network.l1_loss import get_l1_absolute_loss
 from util.lab_color_utils_mx import rgb_to_lab
 from util.process_lab_utils_mx import preprocess_lab
 from util.process_lab_utils_np import lab_parts_to_rgb
-
-import matplotlib as mpl
-from matplotlib import pyplot as plt
-
-from mxnet import gluon, autograd, nd
-from mxnet.gluon import nn
 
 
 @implementer(NeuralNetworkInterface)
