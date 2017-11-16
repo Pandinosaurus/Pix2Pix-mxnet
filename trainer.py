@@ -3,6 +3,7 @@ import logging
 
 
 class Trainer(object):
+
     logging.basicConfig(level=logging.INFO)
 
     def __init__(self, trainee, options=None):

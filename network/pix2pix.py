@@ -6,7 +6,7 @@ import mxnet as mx
 import mxnet.ndarray as nd
 import numpy as np
 
-from network.pix2pix_architecture import get_pix2pix_unet_generator, get_pix2pix_discriminator
+from network.pix2pix_g_and_d import get_pix2pix_unet_generator, get_pix2pix_discriminator
 from .neural_network_interface import NeuralNetworkInterface
 from zope.interface import implementer
 
