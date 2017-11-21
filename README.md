@@ -1,4 +1,4 @@
-### Pix2pix for image colorization, Python 3.6 and MXNet 0.11
+#### Pix2pix for image colorization, Python 3.6 and MXNet 0.11
 This is an attempt to implement Pix2pix network using Python and MXNet
 Mainly used to colorize black and white images, specifically videos.
 
@@ -8,10 +8,9 @@ will serve as an input to generator which will attempt to produce a 1x2x256x256 
 that we will feed into the discriminator in a sequence with original a,b channels.
 
 
-### code borrows from
-https://github.com/Ldpe2G/DeepLearningForFun/tree/master/Mxnet-Scala/Pix2Pix
-https://github.com/tqchen/mxnet-gan
+##### Code is based on
 https://github.com/affinelayer/pix2pix-tensorflow
+https://github.com/zackchase/mxnet-the-straight-dope/blob/master/chapter14_generative-adversarial-networks/pixel2pixel.ipynb
 
-### pix2pix
+##### pix2pix paper
 https://arxiv.org/abs/1611.07004

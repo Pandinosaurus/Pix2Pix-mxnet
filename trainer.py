@@ -34,8 +34,7 @@ class Trainer(object):
 
         for epoch in range(0, self.epochs):
 
-            self.trainee.run_iteration()
+            self.trainee.run_iteration(epoch)
 
             if epoch % self.checkpoint_every_epoch == 0:
-                print(epoch)
                 self.save_progress(epoch)

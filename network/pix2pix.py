@@ -1,253 +1,216 @@
-import cv2
 import mxnet as mx
 import mxnet.ndarray as nd
+from mxnet import gluon
+from mxnet import autograd
 import numpy as np
+from matplotlib import pyplot as plt
 
-from network.pix2pix_g_and_d import get_pix2pix_unet_generator, get_pix2pix_discriminator
+from datetime import datetime
+import time
+import logging
+
+
+from network.gluon_pix2pix_modules import UnetGenerator, Discriminator
+from network.metric import facc
+from util.process_lab_utils_np import lab_parts_to_rgb
+from util.visual_utils import visualize
 from .neural_network_interface import NeuralNetworkInterface
 from zope.interface import implementer
 
-from network.l1_loss import get_l1_absolute_loss
+
 from util.lab_color_utils_mx import rgb_to_lab
 from util.process_lab_utils_mx import preprocess_lab
-from util.process_lab_utils_np import lab_parts_to_rgb
 
 
 @implementer(NeuralNetworkInterface)
 class Pix2Pix(object):
+
+    plt.ion()
+
     def __init__(self, options):
 
-        self.ctx = mx.cpu(0) if not options.gpu_ctx else mx.gpu(0)
+        assert options
 
-        # Great explanation of Convolutional network parameters
-        # https://adeshpande3.github.io/adeshpande3.github.io/A-Beginner's-Guide-To-Understanding-Convolutional-Neural-Networks/
-        self.label = mx.nd.zeros((1, 1, 30, 30), ctx=self.ctx)
+        logging.basicConfig(level=logging.DEBUG)
+
+        self.options = options
+        self.batch_size = options.batch_size
+
+        self.ctx = mx.cpu(0) if not options.gpu_ctx else mx.gpu(0)
 
         self.train_iter = mx.image.ImageIter(
             1,
             (3, 256, 256),
             path_imgrec=options.input_dir
         )
-        self.kernel_size = (4, 4)  # look at a square of 4x4 pixels to form a filter
-        self.stride_size = (2, 2)  # amount by which the filter shifts
-        self.padding_size = (1, 1)
-        self.slope = 0.2
-        self.no_bias = True
-        self.fix_gamma = True
-        self.ngf = options.ngf if options.ngf else 64  # starting number of generator filters
-        self.ndf = options.ngf if options.ndf else 64  # starting number of discriminator filters
-        self.batch_size = options.batch_size if options.batch_size else 1  # we train on one image at a time
-        self.nc = 2  # number of channels in an image
-        self.lr = options.lr if options.lr else 0.0002
-        self.epochs = options.max_epochs if options.max_epochs else 400
-        self.beta1 = options.beta1 if options.beta1 else 400
-        self.check_point = True
-        self.temp_grad_discriminator = None
-        self.temp_grad_generator = None
-        self.real_a = mx.nd.empty((1, 1, 256, 256), self.ctx)
-        self.real_b = mx.nd.empty((1, 2, 256, 256), self.ctx)
-        self.fake_b = mx.nd.empty((1, 2, 256, 256), self.ctx)
-        self.resumed = False
-        self.opts = options
-        self.l1_loss = 0
 
-        assert self.opts
-        assert self.opts.input_dir
-        assert self.train_iter
+        self.lr = options.lr if options.lr else 0.0002
+        self.beta1 = options.beta1 if options.beta1 else 0.5
+        self.lambda1 = options.lambda1 if options.lambda1 else 100
+
+        # Losses
+        self.GAN_loss = gluon.loss.SigmoidBinaryCrossEntropyLoss()
+        self.L1_loss = gluon.loss.L1Loss()
+        self.netG = None
+        self.netD = None
+        self.trainerG = None
+        self.trainerD = None
+
+        self.metric = mx.metric.CustomMetric(facc)
+
+        self.stamp = datetime.now().strftime('%Y_%m_%d-%H_%M')
+
+    def setup(self):
+        self.netG, self.netD, self.trainerG, self.trainerD = self.__set_network()
+        assert self.netG
+        assert self.netD
+        assert self.trainerG
+        assert self.trainerD
+
+    def __param_init(self, param):
+            if param.name.find('conv') != -1:
+                if param.name.find('weight') != -1:
+                    param.initialize(init=mx.init.Normal(0.02), ctx=self.ctx)
+                else:
+                    param.initialize(init=mx.init.Zero(), ctx=self.ctx)
+            elif param.name.find('batchnorm') != -1:
+                param.initialize(init=mx.init.Zero(), ctx=self.ctx)
+                if param.name.find('gamma') != -1:
+                    param.set_data(nd.random_normal(1, 0.02, param.data().shape))
+
+    def __network_init(self, net):
+            for param in net.collect_params().values():
+                self.__param_init(param)
+
+    def __set_network(self):
+
+            if self.options.colorize:
+                final_out = 2
+            else:
+                final_out = 3
+
+            net_g = UnetGenerator(in_channels=1, num_downs=8, final_out=final_out)
+            net_d = Discriminator(in_channels=3)
+
+            self.__network_init(net_g)
+            self.__network_init(net_d)
+
+            trainer_g = gluon.Trainer(net_g.collect_params(), 'adam', {'learning_rate': self.lr, 'beta1': self.beta1})
+            trainer_d = gluon.Trainer(net_d.collect_params(), 'adam', {'learning_rate': self.lr, 'beta1': self.beta1})
+
+            return net_g, net_d, trainer_g, trainer_d
 
     def save_progress(self, epoch):
-        self.mod_discriminator.save_checkpoint("D", epoch, save_optimizer_states=True)
-        self.mod_generator.save_checkpoint("G", epoch, save_optimizer_states=True)
+        filename_net_d = "netD{0}".format(epoch)
+        filename_net_g = "netG{0}".format(epoch)
+        self.netD.save_params(filename_net_d)
+        self.netG.save_params(filename_net_g)
 
     def resume_progress(self, epoch):
-        self.mod_discriminator = mx.module.Module.load("D", epoch, load_optimizer_states=True, data_names=('dData',),
-                                                       label_names=('label',), context=self.ctx)
-        self.mod_discriminator.bind(data_shapes=[("dData", (self.batch_size,) + (2, 256, 256))],
-                                    label_shapes=[('label', (self.batch_size, 1, 30, 30))],
-                                    inputs_need_grad=True)
-        self.mod_discriminator.init_optimizer(optimizer='adam',
-                                              optimizer_params={
-                                                  'learning_rate': self.lr,
-                                                  'wd': 0.,
-                                                  'beta1': 0.5,
-                                              })
-
-        self.mod_generator = mx.module.Module.load("G", epoch, load_optimizer_states=True, data_names=('gData',),
-                                                   label_names=None, context=self.ctx)
-        self.mod_generator.bind(data_shapes=[('gData', (self.batch_size,) + (1, 256, 256))])
-        self.mod_generator.init_optimizer(optimizer='adam',
-                                          optimizer_params={
-                                              'learning_rate': self.lr,
-                                              'wd': 0.,
-                                              'beta1': 0.5,
-                                          })
-
-        self.resumed = True
-
-        self.setup()
+        pass
 
     def visualize_progress(self):
         pass
 
-    def run_iteration(self):
-        self._do_train_iteration()
+    def run_iteration(self, epoch):
 
-    def _do_train_iteration(self):
+        if self.options.colorize:
+            self.__do_train_iteration_colorization(epoch)
+        else:
+            pass
+
+    def __do_train_iteration_colorization(self, epoch):
+
+        epoch_tic = time.time()
+        batch_tic = time.time()
 
         self.train_iter.reset()
         for count, batch in enumerate(self.train_iter):
-            real_a = batch.data[0]
-            real_a = real_a.transpose((0, 2, 3, 1))
-            real_a = nd.array(np.squeeze(real_a.asnumpy(), axis=0), ctx=self.ctx)
 
-            lab = rgb_to_lab(real_a, ctx=self.ctx)
-            lightness_chan, a_chan, b_chan = preprocess_lab(lab)
+            real_in, real_out = self.__prepare_real_in_real_out(batch=batch)
+            fake_out, fake_concat = self.__get_fake_out_fake_concat(real_in)
+            self.__maximize_discriminator(fake_concat, real_in, real_out)
+            self.trainerD.step(batch.data[0].shape[0])
 
-            a_image = nd.expand_dims(lightness_chan, axis=2)
-            a_image = a_image.transpose((3, 2, 0, 1))
-            b_image = nd.stack(a_chan, b_chan, axis=2)
-            b_image = nd.transpose(b_image, axes=(3, 2, 0, 1))
-
-            inputs = a_image
-            targets = b_image
-
-            self.__create_real_fake(inputs, targets)
-            self.__forward_backward()
+            self.__minimize_generator(real_in, real_out, fake_out)
+            self.trainerG.step(batch.data[0].shape[0])
 
             if count % 10 == 0:
 
-                fake_rgb = lab_parts_to_rgb(self.fake_b.asnumpy(), a_image.asnumpy(), self.ctx)
-                # TODO: move to visualize_progress function
-                cv2.imshow("Fake colorization", cv2.cvtColor(fake_rgb, cv2.COLOR_BGR2RGB))
-                cv2.imshow("Real image", cv2.cvtColor(nd.cast(real_a, dtype='uint8').asnumpy(), cv2.COLOR_BGR2RGB))
-                cv2.waitKey(1)
+                visualize(lab_parts_to_rgb(fake_out, real_in, ctx=self.ctx))
+
+                name, acc = self.metric.get()
+                logging.info('speed: {} samples/s'.format(self.batch_size / (time.time() - batch_tic)))
+                logging.info(
+                    'discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
+                    % (nd.mean(self.err_d).asscalar(),
+                       nd.mean(self.err_g).asscalar(), acc, count, epoch))
+
+                batch_tic = time.time()
+
+        name, acc = self.metric.get()
+        self.metric.reset()
+        logging.info('\nbinary training acc at epoch %d: %s=%f' % (epoch, name, acc))
+        logging.info('time: %f' % (time.time() - epoch_tic))
+
+    def __prepare_real_in_real_out(self, batch):
+        real_a = batch.data[0]
+        real_a = real_a.transpose((0, 2, 3, 1))
+        real_a = nd.array(np.squeeze(real_a.asnumpy(), axis=0), ctx=self.ctx)
+        lab = rgb_to_lab(real_a, ctx=self.ctx)
+        lightness_chan, a_chan, b_chan = preprocess_lab(lab)
+
+        real_in = nd.expand_dims(lightness_chan, axis=2)
+        real_in = real_in.transpose((3, 2, 0, 1))
+
+        real_out = nd.stack(a_chan, b_chan, axis=2)
+        real_out = nd.transpose(real_out, axes=(3, 2, 0, 1))
+
+        return real_in, real_out
+
+    def __get_fake_out_fake_concat(self, real_in):
+        fake_out = self.netG(real_in)
+        fake_concat = nd.concat(real_in, fake_out, dim=1)
+        return fake_out, fake_concat
+
+    def __maximize_discriminator(self, fake_concat, real_in, real_out):
+        ############################
+        # (1) Update D network: maximize log(D(x, y)) + log(1 - D(x, G(x, z)))
+        ###########################
+        with autograd.record():
+            # Train with fake image
+            output = self.netD(fake_concat)
+            fake_label = nd.zeros(output.shape, ctx=self.ctx)
+            err_d_fake = self.GAN_loss(output, fake_label)
+            self.metric.update([fake_label, ], [output, ])
+
+            # Train with real image
+            real_concat = nd.concat(real_in, real_out, dim=1)
+            output = self.netD(real_concat)
+            real_label = nd.ones(output.shape, ctx=self.ctx)
+            err_d_real = self.GAN_loss(output, real_label)
+            err_d = (err_d_real + err_d_fake) * 0.5
+            err_d.backward()
+            self.err_d = err_d
+            self.metric.update([real_label, ], [output, ])
+
+    def __minimize_generator(self, real_in, real_out, fake_out):
+        ############################
+        # (2) Update G network: minimize log(D(x, G(x, z))) - lambda1 * L1(y, G(x, z))
+        ###########################
+        with autograd.record():
+            fake_out = self.netG(real_in)
+            fake_concat = nd.concat(real_in, fake_out, dim=1)
+            output = self.netD(fake_concat)
+            real_label = nd.ones(output.shape, ctx=self.ctx)
+            err_g = self.GAN_loss(output, real_label) + self.L1_loss(real_out, fake_out) * self.lambda1
+            err_g.backward()
+            self.err_g = err_g
 
 
-    def __create_real_fake(self, inputs, targets):
-        self.real_a = inputs
-        self.real_b = targets
-        self.mod_generator.forward(mx.io.DataBatch([self.real_a]), is_train=True)
-        self.fake_b = self.mod_generator.get_outputs()[0].copy()
-
-    def __forward_backward(self):
-        self.__forward_discriminator()
-        self.__forward_generator()
-        self.mod_discriminator.update()
-        self.mod_generator.update()
-
-    def __forward_discriminator(self):
-        # Update discriminator on real
-        # here we update the weights of the discriminator network by showing it what is a real image and supplying real label to it
-        # if it detects a real image as fake, it would update weights accordingly
-        # D(x,y)
-
-        # We train D to maximize the probability of assigning the correct label to both training examples and samples from G
-        self.label[:] = 1
-        self.mod_discriminator.forward(mx.io.DataBatch([self.real_b], [self.label]), is_train=True)
-        self.mod_discriminator.backward()
-
-        # we get total discriminator gradient after backward o
-        self.temp_grad_discriminator = [[grad.copyto(grad.context) for grad in grads] for grads in
-                                        self.mod_discriminator._exec_group.grad_arrays]
-
-        # Update discriminator on fake
-        self.label[:] = 0
-        self.mod_discriminator.forward(mx.io.DataBatch([self.fake_b], [self.label]), is_train=True)
-        self.mod_discriminator.backward()
-        self.__sum_temp_grad_discriminator()
 
 
-    def __forward_generator(self):
-        # G* = arg min max Loss of cGAN (G,D) + train_lambda * Loss L1(G)
-        #           G   D
-        # L1 loss = self.mod_loss => absolute difference between real image and a generated fake
-        # duh
-        # We send fake image inpersonating as a real one to the discriminator,
-        # and getting the error that we get from D(G(x))
-        # the error we get from the discriminator shows how well discriminator can tell if something
-        # is real or fake.
 
-        # We simultaneously train G to minimize log(1 − D(G(z)))
-        self.label[:] = 1
-        self.mod_discriminator.forward(mx.io.DataBatch([self.fake_b], [self.label]), is_train=True)
-        self.mod_discriminator.backward()  # back-propogate on the real error - adjust weights
 
-        df_dg = self.mod_discriminator.get_input_grads()[0]
 
-        self.mod_loss.forward(mx.io.DataBatch([self.fake_b, self.real_b]), is_train=True)
-        self.mod_loss.backward()
 
-        self.l1_loss = self.mod_loss.get_outputs()[0].asnumpy().sum()
-        train_lambda = 100
-        df_doae = mx.nd.multiply(self.mod_loss.get_input_grads()[0], train_lambda)
-
-        combine = df_dg + df_doae
-
-        self.mod_generator.backward([combine])
-        self.__save_temp_grad_generator()
-
-    def setup(self):
-        symbol_generator = get_pix2pix_unet_generator(self)
-        symbol_discriminator = get_pix2pix_discriminator(self)
-
-        mod_loss = mx.mod.Module(symbol=get_l1_absolute_loss(), data_names=("origin", "rec",), label_names=None,
-                                 context=self.ctx)
-        mod_loss.bind(data_shapes=[('origin', (self.batch_size,) + (2, 256, 256)), ('rec', (self.batch_size,) + (2, 256, 256))], inputs_need_grad=True)
-        mod_loss.init_params(initializer=mx.init.Zero())
-        mod_loss.init_optimizer(
-            optimizer='adam',
-            optimizer_params={
-                'learning_rate': self.lr,
-                'wd': 0.,
-                'beta1': 0.5,
-            })
-
-        self.mod_loss = mod_loss
-
-        if not self.resumed:
-            # =============module G=============
-            module_generator = mx.mod.Module(symbol=symbol_generator, data_names=('gData',), label_names=None,
-                                             context=self.ctx)
-            module_generator.bind(data_shapes=[('gData', (self.batch_size,) + (1, 256, 256))])
-            module_generator.init_params(initializer=mx.init.Normal(0.02))
-            module_generator.init_optimizer(
-                optimizer='adam',
-                optimizer_params={
-                    'learning_rate': self.lr,
-                    'wd': 0.,
-                    'beta1': 0.5,
-                })
-
-            self.mod_generator = module_generator
-            # =============module D=============
-            mod_discriminator = mx.mod.Module(symbol=symbol_discriminator, data_names=('dData',),
-                                              label_names=('label',),
-                                              context=self.ctx)
-            mod_discriminator.bind(data_shapes=[("dData", (self.batch_size,) + (2, 256, 256))],
-                                   label_shapes=[('label', (self.batch_size, 1, 30, 30))],
-                                   inputs_need_grad=True)
-            mod_discriminator.init_params(initializer=mx.init.Normal(0.02))
-            mod_discriminator.init_optimizer(
-                optimizer='adam',
-                optimizer_params={
-                    'learning_rate': self.lr,
-                    'wd': 0.,
-                    'beta1': 0.5,
-                })
-
-            self.mod_discriminator = mod_discriminator
-
-        assert self.mod_loss
-        assert self.mod_generator
-        assert self.mod_discriminator
-        assert self.train_iter
-
-    def __save_temp_grad_generator(self):
-        self.temp_grad_generator = [
-            [grad.copyto(grad.context) for grad in grads]
-            for grads in self.mod_generator._exec_group.grad_arrays]
-
-    def __sum_temp_grad_discriminator(self):
-        for gradsr, gradsf in zip(self.mod_discriminator._exec_group.grad_arrays, self.temp_grad_discriminator):
-            for gradr, gradf in zip(gradsr, gradsf):
-                gradr += gradf
