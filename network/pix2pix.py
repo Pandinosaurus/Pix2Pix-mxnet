@@ -11,9 +11,9 @@ import logging
 
 
 from network.gluon_pix2pix_modules import UnetGenerator, Discriminator
-from network.metric import facc
+from report.Metric import Metric
 from util.process_lab_utils_np import lab_parts_to_rgb
-from util.visual_utils import visualize
+from util.visual_utils import visualize_cv2
 from .neural_network_interface import NeuralNetworkInterface
 from zope.interface import implementer
 
@@ -21,11 +21,14 @@ from zope.interface import implementer
 from util.lab_color_utils_mx import rgb_to_lab
 from util.process_lab_utils_mx import preprocess_lab
 
+from bokeh.plotting import figure, output_file, show
+from bokeh.layouts import row
 
 @implementer(NeuralNetworkInterface)
 class Pix2Pix(object):
 
     plt.ion()
+    output_file("training.html")
 
     def __init__(self, options):
 
@@ -34,6 +37,9 @@ class Pix2Pix(object):
         logging.basicConfig(level=logging.DEBUG)
 
         self.options = options
+
+        self.metrics = Metric()
+
         self.batch_size = options.batch_size
 
         self.ctx = mx.cpu(0) if not options.gpu_ctx else mx.gpu(0)
@@ -56,9 +62,8 @@ class Pix2Pix(object):
         self.trainerG = None
         self.trainerD = None
 
-        self.metric = mx.metric.CustomMetric(facc)
-
         self.stamp = datetime.now().strftime('%Y_%m_%d-%H_%M')
+
 
     def setup(self):
         self.netG, self.netD, self.trainerG, self.trainerD = self.__set_network()
@@ -135,11 +140,11 @@ class Pix2Pix(object):
             self.__minimize_generator(real_in, real_out, fake_out)
             self.trainerG.step(batch.data[0].shape[0])
 
-            if count % 10 == 0:
+            if count % self.batch_size == 0:
 
-                visualize(lab_parts_to_rgb(fake_out, real_in, ctx=self.ctx))
+                visualize_cv2("Fake", lab_parts_to_rgb(fake_out, real_in, ctx=self.ctx))
 
-                name, acc = self.metric.get()
+                name, acc = self.metrics.get_accuracy()
                 logging.info('speed: {} samples/s'.format(self.batch_size / (time.time() - batch_tic)))
                 logging.info(
                     'discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
@@ -148,8 +153,8 @@ class Pix2Pix(object):
 
                 batch_tic = time.time()
 
-        name, acc = self.metric.get()
-        self.metric.reset()
+        name, acc = self.metrics.get_accuracy()
+        self.metrics.reset_accuracy()
         logging.info('\nbinary training acc at epoch %d: %s=%f' % (epoch, name, acc))
         logging.info('time: %f' % (time.time() - epoch_tic))
 
@@ -182,7 +187,7 @@ class Pix2Pix(object):
             output = self.netD(fake_concat)
             fake_label = nd.zeros(output.shape, ctx=self.ctx)
             err_d_fake = self.GAN_loss(output, fake_label)
-            self.metric.update([fake_label, ], [output, ])
+            self.metrics.update_accuracy(fake_label, output)
 
             # Train with real image
             real_concat = nd.concat(real_in, real_out, dim=1)
@@ -192,7 +197,7 @@ class Pix2Pix(object):
             err_d = (err_d_real + err_d_fake) * 0.5
             err_d.backward()
             self.err_d = err_d
-            self.metric.update([real_label, ], [output, ])
+            self.metrics.update_accuracy(real_label, output)
 
     def __minimize_generator(self, real_in, real_out, fake_out):
         ############################

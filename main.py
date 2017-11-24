@@ -4,7 +4,7 @@ from options import parse_startup_arguments
 from trainer import Trainer
 
 
-os.environ['MXNET_CPU_WORKER_NTHREADS'] = "16"
+os.environ['MXNET_CPU_WORKER_NTHREADS'] = "8"
 
 if __name__ == '__main__':
     options = parse_startup_arguments()
