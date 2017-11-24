@@ -61,9 +61,10 @@ class Pix2Pix(object):
         self.netD = None
         self.trainerG = None
         self.trainerD = None
+        self.err_g = None
+        self.err_d = None
 
         self.stamp = datetime.now().strftime('%Y_%m_%d-%H_%M')
-
 
     def setup(self):
         self.netG, self.netD, self.trainerG, self.trainerD = self.__set_network()
@@ -127,16 +128,15 @@ class Pix2Pix(object):
     def __do_train_iteration_colorization(self, epoch):
 
         epoch_tic = time.time()
-        batch_tic = time.time()
 
         self.train_iter.reset()
         for count, batch in enumerate(self.train_iter):
 
             real_in, real_out = self.__prepare_real_in_real_out(batch=batch)
             fake_out, fake_concat = self.__get_fake_out_fake_concat(real_in)
-            self.__maximize_discriminator(fake_concat, real_in, real_out)
-            self.trainerD.step(batch.data[0].shape[0])
 
+            self.__maximize_discriminator(fake_concat, real_in, real_out)
+            self.trainerD.step(batch.data[0].shape[0], )
             self.__minimize_generator(real_in, real_out, fake_out)
             self.trainerG.step(batch.data[0].shape[0])
 
@@ -145,16 +145,19 @@ class Pix2Pix(object):
                 visualize_cv2("Fake", lab_parts_to_rgb(fake_out, real_in, ctx=self.ctx))
 
                 name, acc = self.metrics.get_accuracy()
-                logging.info('speed: {} samples/s'.format(self.batch_size / (time.time() - batch_tic)))
+
+                self.metrics.log_accuracy()
+
                 logging.info(
                     'discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
                     % (nd.mean(self.err_d).asscalar(),
                        nd.mean(self.err_g).asscalar(), acc, count, epoch))
 
-                batch_tic = time.time()
 
         name, acc = self.metrics.get_accuracy()
+
         self.metrics.reset_accuracy()
+
         logging.info('\nbinary training acc at epoch %d: %s=%f' % (epoch, name, acc))
         logging.info('time: %f' % (time.time() - epoch_tic))
 
@@ -194,9 +197,8 @@ class Pix2Pix(object):
             output = self.netD(real_concat)
             real_label = nd.ones(output.shape, ctx=self.ctx)
             err_d_real = self.GAN_loss(output, real_label)
-            err_d = (err_d_real + err_d_fake) * 0.5
-            err_d.backward()
-            self.err_d = err_d
+            self.err_d = (err_d_real + err_d_fake) * 0.5
+            self.err_d.backward()
             self.metrics.update_accuracy(real_label, output)
 
     def __minimize_generator(self, real_in, real_out, fake_out):
@@ -208,9 +210,8 @@ class Pix2Pix(object):
             fake_concat = nd.concat(real_in, fake_out, dim=1)
             output = self.netD(fake_concat)
             real_label = nd.ones(output.shape, ctx=self.ctx)
-            err_g = self.GAN_loss(output, real_label) + self.L1_loss(real_out, fake_out) * self.lambda1
-            err_g.backward()
-            self.err_g = err_g
+            self.err_g = self.GAN_loss(output, real_label) + self.L1_loss(real_out, fake_out) * self.lambda1
+            self.err_g.backward()
 
 
 

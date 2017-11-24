@@ -1,4 +1,6 @@
-#### Pix2pix for image colorization, Python 3.6 and MXNet 0.11
+#### Pix2pix for image colorization
+###### Python 3.6 and MXNet 0.11
+
 This is an attempt to implement Pix2pix network using Python and MXNet
 Mainly used to colorize black and white images, specifically videos.
 
@@ -7,6 +9,8 @@ An image will be split into lightness and a,b channels, the lightness channel
 will serve as an input to generator which will attempt to produce a 1x2x256x256 a,b channels tensor
 that we will feed into the discriminator in a sequence with original a,b channels.
 
+#### Metrics visualization
+tensorboard --logdir=./logs/train
 
 ##### Code is based on
 https://github.com/affinelayer/pix2pix-tensorflow
