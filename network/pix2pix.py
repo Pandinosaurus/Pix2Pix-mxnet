@@ -1,13 +1,13 @@
+
+import time
+import logging
+from datetime import datetime
+
 import mxnet as mx
 import mxnet.ndarray as nd
 from mxnet import gluon
 from mxnet import autograd
 import numpy as np
-from matplotlib import pyplot as plt
-
-from datetime import datetime
-import time
-import logging
 
 
 from network.gluon_pix2pix_modules import UnetGenerator, Discriminator
@@ -16,19 +16,12 @@ from util.process_lab_utils_np import lab_parts_to_rgb
 from util.visual_utils import visualize_cv2
 from .neural_network_interface import NeuralNetworkInterface
 from zope.interface import implementer
-
-
 from util.lab_color_utils_mx import rgb_to_lab
 from util.process_lab_utils_mx import preprocess_lab
 
-from bokeh.plotting import figure, output_file, show
-from bokeh.layouts import row
 
 @implementer(NeuralNetworkInterface)
 class Pix2Pix(object):
-
-    plt.ion()
-    output_file("training.html")
 
     def __init__(self, options):
 
@@ -85,6 +78,7 @@ class Pix2Pix(object):
                     param.set_data(nd.random_normal(1, 0.02, param.data().shape))
 
     def __network_init(self, net):
+            net.collect_params().setattr('grad_req', 'write')
             for param in net.collect_params().values():
                 self.__param_init(param)
 
@@ -96,7 +90,7 @@ class Pix2Pix(object):
                 final_out = 3
 
             net_g = UnetGenerator(in_channels=1, num_downs=8, final_out=final_out)
-            net_d = Discriminator(in_channels=3)
+            net_d = Discriminator(in_channels=3, use_sigmoid=False)
 
             self.__network_init(net_g)
             self.__network_init(net_d)
@@ -106,17 +100,17 @@ class Pix2Pix(object):
 
             return net_g, net_d, trainer_g, trainer_d
 
-    def save_progress(self, epoch):
-        filename_net_d = "netD{0}".format(epoch)
-        filename_net_g = "netG{0}".format(epoch)
+    def save_progress(self, position):
+        filename_net_d = "netD{0}".format(position)
+        filename_net_g = "netG{0}".format(position)
         self.netD.save_params(filename_net_d)
         self.netG.save_params(filename_net_g)
 
-    def resume_progress(self, epoch):
-        pass
-
-    def visualize_progress(self):
-        pass
+    def resume_progress(self, position):
+        filename_net_d = "netD{0}".format(position)
+        filename_net_g = "netG{0}".format(position)
+        self.netD.load_params(filename_net_d, ctx=self.ctx)
+        self.netG.load_params(filename_net_g, ctx=self.ctx)
 
     def run_iteration(self, epoch):
 
@@ -128,6 +122,7 @@ class Pix2Pix(object):
     def __do_train_iteration_colorization(self, epoch):
 
         epoch_tic = time.time()
+        batch_tic = time.time()
 
         self.train_iter.reset()
         for count, batch in enumerate(self.train_iter):
@@ -136,23 +131,33 @@ class Pix2Pix(object):
             fake_out, fake_concat = self.__get_fake_out_fake_concat(real_in)
 
             self.__maximize_discriminator(fake_concat, real_in, real_out)
+
             self.trainerD.step(batch.data[0].shape[0], )
             self.__minimize_generator(real_in, real_out, fake_out)
+
             self.trainerG.step(batch.data[0].shape[0])
 
-            if count % self.batch_size == 0:
+            training_speed_sec = time.time() - batch_tic
 
-                visualize_cv2("Fake", lab_parts_to_rgb(fake_out, real_in, ctx=self.ctx))
 
-                name, acc = self.metrics.get_accuracy()
+            visualize_cv2("Fake", lab_parts_to_rgb(fake_out, real_in, ctx=self.ctx))
 
-                self.metrics.log_accuracy()
+            name, acc = self.metrics.get_accuracy()
 
-                logging.info(
+            self.metrics.log_accuracy()
+            self.metrics.log_speed(training_speed_sec)
+
+            logging.info('samples per second: {}'.format(self.batch_size / (time.time() - batch_tic)))
+
+            logging.info(
                     'discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
                     % (nd.mean(self.err_d).asscalar(),
                        nd.mean(self.err_g).asscalar(), acc, count, epoch))
 
+            if count % self.options.checkpoint_freq == 0:
+                self.save_progress(count)
+
+            batch_tic = time.time()
 
         name, acc = self.metrics.get_accuracy()
 
@@ -186,6 +191,7 @@ class Pix2Pix(object):
         # (1) Update D network: maximize log(D(x, y)) + log(1 - D(x, G(x, z)))
         ###########################
         with autograd.record():
+
             # Train with fake image
             output = self.netD(fake_concat)
             fake_label = nd.zeros(output.shape, ctx=self.ctx)
@@ -199,19 +205,30 @@ class Pix2Pix(object):
             err_d_real = self.GAN_loss(output, real_label)
             self.err_d = (err_d_real + err_d_fake) * 0.5
             self.err_d.backward()
+
             self.metrics.update_accuracy(real_label, output)
+
+            first_layer_gradient = self.__get_incoming_gradient(self.netD)
+            self.metrics.log_gradient('discriminator', first_layer_gradient)
 
     def __minimize_generator(self, real_in, real_out, fake_out):
         ############################
         # (2) Update G network: minimize log(D(x, G(x, z))) - lambda1 * L1(y, G(x, z))
         ###########################
         with autograd.record():
+
+            # print(self.netG.collect_params())
             fake_out = self.netG(real_in)
             fake_concat = nd.concat(real_in, fake_out, dim=1)
             output = self.netD(fake_concat)
             real_label = nd.ones(output.shape, ctx=self.ctx)
             self.err_g = self.GAN_loss(output, real_label) + self.L1_loss(real_out, fake_out) * self.lambda1
             self.err_g.backward()
+            first_layer_gradient = self.__get_incoming_gradient(self.netG)
+            self.metrics.log_gradient('generator', first_layer_gradient)
+
+    def __get_incoming_gradient(self, network):
+        return list(network.collect_params().values())[0].list_grad()[0].asnumpy().flatten()
 
 
 

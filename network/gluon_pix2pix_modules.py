@@ -55,16 +55,16 @@ class UnetGenerator(HybridBlock):
     def __init__(self, in_channels, num_downs, ngf=64, use_dropout=True, final_out=3):
         super(UnetGenerator, self).__init__()
 
-        # Build unet generator structure
-        unet = UnetSkipUnit(ngf * 8, ngf * 8, innermost=True)
-        for _ in range(num_downs - 5):
-            unet = UnetSkipUnit(ngf * 8, ngf * 8, unet, use_dropout=use_dropout)
-        unet = UnetSkipUnit(ngf * 8, ngf * 4, unet)
-        unet = UnetSkipUnit(ngf * 4, ngf * 2, unet)
-        unet = UnetSkipUnit(ngf * 2, ngf * 1, unet)
-        unet = UnetSkipUnit(ngf, in_channels, unet, outermost=True, final_out=final_out)
-
         with self.name_scope():
+            # Build unet generator structure
+            unet = UnetSkipUnit(ngf * 8, ngf * 8, innermost=True)
+            for _ in range(num_downs - 5):
+                unet = UnetSkipUnit(ngf * 8, ngf * 8, unet, use_dropout=use_dropout)
+            unet = UnetSkipUnit(ngf * 8, ngf * 4, unet)
+            unet = UnetSkipUnit(ngf * 4, ngf * 2, unet)
+            unet = UnetSkipUnit(ngf * 2, ngf * 1, unet)
+            unet = UnetSkipUnit(ngf, in_channels, unet, outermost=True, final_out=final_out)
+
             self.model = unet
 
     def hybrid_forward(self, F, x, **kwargs):
@@ -73,7 +73,7 @@ class UnetGenerator(HybridBlock):
 
 # Define the PatchGAN discriminator
 class Discriminator(HybridBlock):
-    def __init__(self, in_channels, ndf=64, n_layers=3, use_sigmoid=False, use_bias=False):
+    def __init__(self, in_channels, ndf=64, n_layers=3, use_sigmoid=True, use_bias=False):
         super(Discriminator, self).__init__()
 
         with self.name_scope():

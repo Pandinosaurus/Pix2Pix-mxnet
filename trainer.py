@@ -14,13 +14,14 @@ class Trainer(object):
         self.epochs = options.max_epochs if options.max_epochs else 400
         self.checkpoint_every_epoch = options.checkpoint_freq
         self.resume = options.resume_training if options.resume_training else False
-        self.resume_epoch = options.resume_epoch if options.resume_epoch else 0
+        self.resume_position = options.resume_position if options.resume_position else 0
 
-    def save_progress(self, epoch):
-        self.trainee.save_progress(epoch)
+    def save_progress(self, position):
+        self.trainee.save_progress(position)
 
-    def resume_progress(self, epoch):
-        self.trainee.resume_progress(epoch)
+    def resume_progress(self, position):
+        self.setup_network()
+        self.trainee.resume_progress(position)
 
     def setup_network(self):
         self.trainee.setup()
@@ -28,7 +29,7 @@ class Trainer(object):
     def do_train(self):
 
         if self.resume:
-            self.resume_progress(self.resume_epoch)
+            self.resume_progress(self.resume_position)
         else:
             self.setup_network()
 
