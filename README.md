@@ -1,5 +1,5 @@
 #### Pix2pix for image colorization
-###### Python 3.6 and MXNet 0.11
+###### Python 3.6 and MXNet 1.0
 
 This is an attempt to implement Pix2pix network using Python and MXNet
 Mainly used to colorize black and white images, specifically videos.
@@ -21,4 +21,4 @@ https://arxiv.org/abs/1611.07004
 
 ####
 Video colorization example:
-![Video colorization, captured and colorized in real-time using notebook and usb web-cam](https://s3-us-west-1.amazonaws.com/pix2pix/real_time_video_colorization_street.gif)
+![Video colorization, captured and colorized in real-time using notebook and usb web-cam](https://s3-us-west-1.amazonaws.com/pix2pix/real_time_video_colorization.gif)
