@@ -18,3 +18,7 @@ https://github.com/zackchase/mxnet-the-straight-dope/blob/master/chapter14_gener
 
 ##### pix2pix paper
 https://arxiv.org/abs/1611.07004
+
+####
+Video colorization example:
+![Video colorization, captured and colorized in real-time using notebook and usb web-cam](https://s3-us-west-1.amazonaws.com/pix2pix/real_time_video_colorization.gif)

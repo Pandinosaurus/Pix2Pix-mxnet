@@ -11,9 +11,9 @@ def parse_startup_arguments():
     parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
     parser.add_argument("--ndf", type=int, default=64, help="number of discriminator filters in first conv layer")
 
-    parser.add_argument("--resume_training", type=bool, default=False,
+    parser.add_argument("--resume_training", type=bool, default=True,
                         help="Whether or not to continue training a model")
-    parser.add_argument("--resume_position", type=int, default=7100,
+    parser.add_argument("--resume_position", type=int, default=11000,
                         help="Epoch or iteration to pick from previous save to continue training")
     parser.add_argument("--checkpoint_freq", type=int, default=100,
                         help="Save a checkpoint every {checkpoint_freq} iteration")
