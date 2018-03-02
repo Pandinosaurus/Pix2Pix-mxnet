@@ -86,11 +86,13 @@ class Pix2Pix(object):
 
             if self.options.colorize:
                 final_out = 2
+                in_channels = 1
             else:
                 final_out = 3
+                in_channels = 3
 
-            net_g = UnetGenerator(in_channels=1, num_downs=8, final_out=final_out)
-            net_d = Discriminator(in_channels=3, use_sigmoid=False)
+            net_g = UnetGenerator(in_channels=3, num_downs=8, final_out=final_out)
+            net_d = Discriminator(in_channels=6, use_sigmoid=False)
 
             self.__network_init(net_g)
             self.__network_init(net_d)

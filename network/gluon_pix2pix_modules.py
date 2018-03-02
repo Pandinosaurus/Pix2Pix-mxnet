@@ -57,7 +57,10 @@ class UnetGenerator(HybridBlock):
 
         with self.name_scope():
             # Build unet generator structure
+
+            # 64 * 8 inner channels, 64 * 8 outer channels
             unet = UnetSkipUnit(ngf * 8, ngf * 8, innermost=True)
+
             for _ in range(num_downs - 5):
                 unet = UnetSkipUnit(ngf * 8, ngf * 8, unet, use_dropout=use_dropout)
             unet = UnetSkipUnit(ngf * 8, ngf * 4, unet)
