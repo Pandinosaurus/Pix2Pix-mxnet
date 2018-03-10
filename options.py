@@ -11,9 +11,9 @@ def parse_startup_arguments():
     parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
     parser.add_argument("--ndf", type=int, default=64, help="number of discriminator filters in first conv layer")
 
-    parser.add_argument("--resume_training", type=bool, default=True,
+    parser.add_argument("--resume_training", type=bool, default=False,
                         help="Whether or not to continue training a model")
-    parser.add_argument("--resume_position", type=int, default=18000,
+    parser.add_argument("--resume_position", type=int, default=500,
                         help="Epoch or iteration to pick from previous save to continue training")
     parser.add_argument("--checkpoint_freq", type=int, default=100,
                         help="Save a checkpoint every {checkpoint_freq} iteration")
@@ -21,7 +21,7 @@ def parse_startup_arguments():
     parser.add_argument("--lr", type=float, default=0.0002, help="initial learning rate for adam")
     parser.add_argument("--beta1", type=float, default=0.5, help="momentum term of adam")
     parser.add_argument("--lambda1", type=float, default=100, help="Lambda for training of L1 loss")
-    parser.add_argument("--l1_weight", type=float, default=100.0, help="weight on L1 term for generator gradient")
+    parser.add_argument("--l1_weight", type=float, default=100, help="weight on L1 term for generator gradient")
 
     parser.add_argument("--gpu_ctx", type=bool, default=False, help="Whether to use GPU or CPU")
     parser.add_argument("--colorize", type=bool, default=True, help="Whether to use LAB colorization in training")

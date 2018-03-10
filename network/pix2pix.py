@@ -1,6 +1,7 @@
 
 import time
 import logging
+from cv2 import cv2
 from datetime import datetime
 
 import mxnet as mx
@@ -13,7 +14,7 @@ import numpy as np
 from network.gluon_pix2pix_modules import UnetGenerator, Discriminator
 from report.Metric import Metric
 from util.process_lab_utils_np import lab_parts_to_rgb
-from util.visual_utils import visualize_cv2
+from util.visual_utils import visualize_cv2, visualize_rgb, visualize_ndarray
 from .neural_network_interface import NeuralNetworkInterface
 from zope.interface import implementer
 from util.lab_color_utils_mx import rgb_to_lab
@@ -40,7 +41,7 @@ class Pix2Pix(object):
         self.train_iter = mx.image.ImageIter(
             1,
             (3, 256, 256),
-            path_imgrec=options.input_dir
+            path_imgrec=options.input_dir,
         )
 
         self.lr = options.lr if options.lr else 0.0002
@@ -91,14 +92,17 @@ class Pix2Pix(object):
                 final_out = 3
                 in_channels = 3
 
-            net_g = UnetGenerator(in_channels=3, num_downs=8, final_out=final_out)
-            net_d = Discriminator(in_channels=6, use_sigmoid=False)
+            net_g = UnetGenerator(in_channels=1, num_downs=8, final_out=final_out)
+            net_d = Discriminator(in_channels=3, use_sigmoid=True)
 
             self.__network_init(net_g)
             self.__network_init(net_d)
 
             trainer_g = gluon.Trainer(net_g.collect_params(), 'adam', {'learning_rate': self.lr, 'beta1': self.beta1})
             trainer_d = gluon.Trainer(net_d.collect_params(), 'adam', {'learning_rate': self.lr, 'beta1': self.beta1})
+
+            net_g.hybridize()
+            net_d.hybridize()
 
             return net_g, net_d, trainer_g, trainer_d
 
@@ -131,18 +135,14 @@ class Pix2Pix(object):
 
             real_in, real_out = self.__prepare_real_in_real_out(batch=batch)
             fake_out, fake_concat = self.__get_fake_out_fake_concat(real_in)
-
-            self.__maximize_discriminator(fake_concat, real_in, real_out)
-
-            self.trainerD.step(batch.data[0].shape[0], )
-            self.__minimize_generator(real_in, real_out, fake_out)
-
-            self.trainerG.step(batch.data[0].shape[0])
+            shape = batch.data[0].shape[0]
+            self.__maximize_discriminator(fake_concat, real_in, real_out, shape)
+            self.__minimize_generator(real_in, real_out, fake_out, shape)
 
             training_speed_sec = time.time() - batch_tic
 
-
             visualize_cv2("Fake", lab_parts_to_rgb(fake_out, real_in, ctx=self.ctx))
+            visualize_cv2("Real", lab_parts_to_rgb(real_out, real_in, ctx=self.ctx))
 
             name, acc = self.metrics.get_accuracy()
 
@@ -172,10 +172,11 @@ class Pix2Pix(object):
         real_a = batch.data[0]
         real_a = real_a.transpose((0, 2, 3, 1))
         real_a = nd.array(np.squeeze(real_a.asnumpy(), axis=0), ctx=self.ctx)
+
         lab = rgb_to_lab(real_a, ctx=self.ctx)
         lightness_chan, a_chan, b_chan = preprocess_lab(lab)
 
-        real_in = nd.expand_dims(lightness_chan, axis=2)
+        real_in = nd.expand_dims(lightness_chan, axis=3)
         real_in = real_in.transpose((3, 2, 0, 1))
 
         real_out = nd.stack(a_chan, b_chan, axis=2)
@@ -188,7 +189,7 @@ class Pix2Pix(object):
         fake_concat = nd.concat(real_in, fake_out, dim=1)
         return fake_out, fake_concat
 
-    def __maximize_discriminator(self, fake_concat, real_in, real_out):
+    def __maximize_discriminator(self, fake_concat, real_in, real_out, shape):
         ############################
         # (1) Update D network: maximize log(D(x, y)) + log(1 - D(x, G(x, z)))
         ###########################
@@ -201,8 +202,8 @@ class Pix2Pix(object):
             self.metrics.update_accuracy(fake_label, output)
 
             # Train with real image
-            real_concat = nd.concat(real_in, real_out, dim=1)
-            output = self.netD(real_concat)
+            real_AB = nd.concat(real_in, real_out, dim=1)
+            output = self.netD(real_AB)
             real_label = nd.ones(output.shape, ctx=self.ctx)
             err_d_real = self.GAN_loss(output, real_label)
             self.err_d = (err_d_real + err_d_fake) * 0.5
@@ -213,13 +214,14 @@ class Pix2Pix(object):
             first_layer_gradient = self.__get_incoming_gradient(self.netD)
             self.metrics.log_gradient('discriminator', first_layer_gradient)
 
-    def __minimize_generator(self, real_in, real_out, fake_out):
+        self.trainerD.step(shape)
+
+    def __minimize_generator(self, real_in, real_out, fake_out, shape):
         ############################
         # (2) Update G network: minimize log(D(x, G(x, z))) - lambda1 * L1(y, G(x, z))
         ###########################
         with autograd.record():
 
-            # print(self.netG.collect_params())
             fake_out = self.netG(real_in)
             fake_concat = nd.concat(real_in, fake_out, dim=1)
             output = self.netD(fake_concat)
@@ -228,6 +230,8 @@ class Pix2Pix(object):
             self.err_g.backward()
             first_layer_gradient = self.__get_incoming_gradient(self.netG)
             self.metrics.log_gradient('generator', first_layer_gradient)
+
+        self.trainerG.step(shape)
 
     def __get_incoming_gradient(self, network):
         return list(network.collect_params().values())[0].list_grad()[0].asnumpy().flatten()

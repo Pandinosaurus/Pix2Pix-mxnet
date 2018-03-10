@@ -35,10 +35,8 @@ def rgb_to_lab(image_srgb, ctx=None):
         xyz_pixels = nd.linalg_gemm2(rgb_pixels, rgb_to_xyz)
 
         # https://en.wikipedia.org/wiki/Lab_color_space#CIELAB-CIEXYZ_conversions
-
-            # convert to fx = f(X/Xn), fy = f(Y/Yn), fz = f(Z/Zn)
-
-            # normalize for D65 white point
+        # convert to fx = f(X/Xn), fy = f(Y/Yn), fz = f(Z/Zn)
+        # normalize for D65 white point
         xyz_normalized_pixels = nd.multiply(xyz_pixels, nd.array([1 / 0.950456, 1.0, 1 / 1.088754]))
 
         epsilon = 6 / 29
@@ -82,7 +80,6 @@ def lab_to_rgb(lab, ctx=None):
         linear_mask = fxfyfz_pixels <= epsilon
         exponential_mask = fxfyfz_pixels > epsilon
 
-
         xyz_pixels = (3 * epsilon ** 2 * (fxfyfz_pixels - 4 / 29)) * linear_mask + (fxfyfz_pixels ** 3) * exponential_mask
 
         xyz_pixels = nd.multiply(xyz_pixels, nd.array([0.950456, 1.0, 1.088754]))
@@ -104,13 +101,10 @@ def lab_to_rgb(lab, ctx=None):
 
         return srgb_pixels.reshape(lab.shape)
 
-def __normalize_rgb_image(arr):
-    cast = nd.cast(arr, 'float32')
-    scale = 1. / 255
-    return nd.multiply(cast, scale)
 
-def __denormalize_rgb_image(arr):
-    nd.multiply(arr, 255.0)
+def __normalize_rgb_image(arr):
+    return nd.cast(arr, "float32") / 255.0
+
 
 def __check_image(image):
     assert image.shape[-1] == 3

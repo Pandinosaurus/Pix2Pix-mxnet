@@ -4,6 +4,7 @@ import mxnet.ndarray as nd
 # such as np.squeeze
 # Fall back to numpy
 
+
 def preprocess_lab(lab):
     """
     Normalize lab color space to a format friendly for training via neural nets
