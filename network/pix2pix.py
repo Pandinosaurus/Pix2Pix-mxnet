@@ -1,7 +1,6 @@
-
 import time
 import logging
-from cv2 import cv2
+
 from datetime import datetime
 
 import mxnet as mx
@@ -14,7 +13,7 @@ import numpy as np
 from network.gluon_pix2pix_modules import UnetGenerator, Discriminator
 from report.Metric import Metric
 from util.process_lab_utils_np import lab_parts_to_rgb
-from util.visual_utils import visualize_cv2, visualize_rgb, visualize_ndarray
+from util.visual_utils import visualize_cv2
 from .neural_network_interface import NeuralNetworkInterface
 from zope.interface import implementer
 from util.lab_color_utils_mx import rgb_to_lab
@@ -85,12 +84,7 @@ class Pix2Pix(object):
 
     def __set_network(self):
 
-            if self.options.colorize:
-                final_out = 2
-                in_channels = 1
-            else:
-                final_out = 3
-                in_channels = 3
+            final_out = 2  # colorization
 
             net_g = UnetGenerator(in_channels=1, num_downs=8, final_out=final_out)
             net_d = Discriminator(in_channels=3, use_sigmoid=True)
@@ -119,15 +113,10 @@ class Pix2Pix(object):
         self.netG.load_params(filename_net_g, ctx=self.ctx)
 
     def run_iteration(self, epoch):
-
-        if self.options.colorize:
-            self.__do_train_iteration_colorization(epoch)
-        else:
-            pass
+        self.__do_train_iteration_colorization(epoch)
 
     def __do_train_iteration_colorization(self, epoch):
 
-        epoch_tic = time.time()
         batch_tic = time.time()
 
         self.train_iter.reset()
@@ -144,29 +133,13 @@ class Pix2Pix(object):
             visualize_cv2("Fake", lab_parts_to_rgb(fake_out, real_in, ctx=self.ctx))
             visualize_cv2("Real", lab_parts_to_rgb(real_out, real_in, ctx=self.ctx))
 
-            name, acc = self.metrics.get_accuracy()
-
             self.metrics.log_accuracy()
             self.metrics.log_speed(training_speed_sec)
-
-            logging.info('samples per second: {}'.format(self.batch_size / (time.time() - batch_tic)))
-
-            logging.info(
-                    'discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
-                    % (nd.mean(self.err_d).asscalar(),
-                       nd.mean(self.err_g).asscalar(), acc, count, epoch))
 
             if count % self.options.checkpoint_freq == 0:
                 self.save_progress(count)
 
             batch_tic = time.time()
-
-        name, acc = self.metrics.get_accuracy()
-
-        self.metrics.reset_accuracy()
-
-        logging.info('\nbinary training acc at epoch %d: %s=%f' % (epoch, name, acc))
-        logging.info('time: %f' % (time.time() - epoch_tic))
 
     def __prepare_real_in_real_out(self, batch):
         real_a = batch.data[0]

@@ -1,5 +1,5 @@
 #### Pix2pix for image colorization
-###### Python 3.6 and MXNet 1.0
+###### Python 3.6 and MXNet 1.1
 
 This is an attempt to implement Pix2pix network using Python and MXNet
 Mainly used to colorize black and white images, specifically videos.

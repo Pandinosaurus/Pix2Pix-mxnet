@@ -1,5 +1,6 @@
 import argparse
 
+
 def parse_startup_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("--colorize_file_name", default=None, help="path to file to colorize")
@@ -24,9 +25,9 @@ def parse_startup_arguments():
     parser.add_argument("--l1_weight", type=float, default=100, help="weight on L1 term for generator gradient")
 
     parser.add_argument("--gpu_ctx", type=bool, default=False, help="Whether to use GPU or CPU")
-    parser.add_argument("--colorize", type=bool, default=True, help="Whether to use LAB colorization in training")
 
     options = parser.parse_args()
+
     assert options
     assert options.lr is not None
     assert options.beta1 is not None

@@ -22,6 +22,5 @@ def show_numpy_array(image_name, image_array):
 def __display(image_name, image_array):
     if (image_array.shape[-1] == 3):
         cv2.imshow(image_name, cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR))
-        # cv2.imshow(image_name, image_array)
     else:
         cv2.imshow(image_name, image_array)

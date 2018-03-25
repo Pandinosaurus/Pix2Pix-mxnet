@@ -58,7 +58,6 @@ def lab_to_rgb_numpy(lab):
     linear_mask = fxfyfz_pixels <= epsilon
     exponential_mask = fxfyfz_pixels > epsilon
 
-
     xyz_pixels = (3 * epsilon ** 2 * (fxfyfz_pixels - 4 / 29)) * linear_mask + (fxfyfz_pixels ** 3) * exponential_mask
 
     xyz_pixels = np.multiply(xyz_pixels, [0.950456, 1.0, 1.088754])
@@ -71,7 +70,6 @@ def lab_to_rgb_numpy(lab):
     rgb_pixels = np.dot(xyz_pixels, xyz_to_rgb)
     np.clip(rgb_pixels, 0.0, 1.0, out=rgb_pixels)
 
-
     linear_mask = rgb_pixels <= 0.0031308
     exponential_mask = rgb_pixels > 0.0031308
 
@@ -81,31 +79,25 @@ def lab_to_rgb_numpy(lab):
 
     return np.ravel(srgb_pixels).reshape(lab.shape)
 
+
 def _denormalize_rgb_image(image_array):
-    if(isinstance(image_array, np.ndarray)):
+    if isinstance(image_array, np.ndarray):
         return __denormalize_rgb_image_np(image_array)
     return image_array
 
+
 def _normalize_rgb_image(image_array):
-    if(isinstance(image_array, np.ndarray)):
+    if isinstance(image_array, np.ndarray):
         return __normalize_rgb_image_np(image_array)
 
 
 def __normalize_rgb_image_np(arr):
-    # type: (np.ndarray) -> np.ndarray
-    """
-    :param arr: (N, N, 3L) matrix representing image of size N*N
-    :return: Normalized array of with RGB values ranging from 0 to 1
-    """
     return np.ndarray.astype(np.divide(arr, 255.0), np.float32)
 
+
 def __denormalize_rgb_image_np(arr):
-    # type: (np.ndarray) -> np.ndarray
-    """
-    :param arr: (N, N, 3L) matrix representing image of size N*N
-    :return: Normalized array of with RGB values ranging from 0 to 1
-    """
     np.multiply(arr, 255.0)
+
 
 def _check_image(image):
     assert image.shape[-1] == 3

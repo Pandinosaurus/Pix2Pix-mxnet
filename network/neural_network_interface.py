@@ -4,7 +4,7 @@ import zope.interface
 class NeuralNetworkInterface(zope.interface.Interface):
     """An interface for a neural network implementations. Defines common attributes and methods"""
 
-    cehck_point = zope.interface.Attribute(
+    check_point = zope.interface.Attribute(
         """Indicates whether or not the network should start from the latest checkpoint""")
 
     batch_size = zope.interface.Attribute(
